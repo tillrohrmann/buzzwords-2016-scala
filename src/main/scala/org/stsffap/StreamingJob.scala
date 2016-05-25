@@ -23,7 +23,6 @@ import org.apache.flink.api.table.{Row, Table, TableEnvironment}
 import org.apache.flink.cep.scala.CEP
 import org.apache.flink.cep.scala.pattern.Pattern
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.windowing.time.Time
 
 object StreamingJob {
@@ -51,13 +50,13 @@ object StreamingJob {
     val processingPatternStream = CEP.pattern(input.keyBy("orderId"), processingPattern)
 
     val processingResult: DataStream[Either[ProcessingWarning, ProcessingSuccess]] = processingPatternStream.select{
-      pattern =>
+      fullPattern =>
         ProcessingSuccess(
-          pattern("received").orderId,
-          pattern("shipped").timestamp,
-          pattern("shipped").timestamp - pattern("received").timestamp)
+          fullPattern("received").orderId,
+          fullPattern("shipped").timestamp,
+          fullPattern("shipped").timestamp - fullPattern("received").timestamp)
     } {
-      (pattern, timestamp) => ProcessingWarning(pattern("received").orderId, timestamp)
+      (partialPattern, timestamp) => ProcessingWarning(partialPattern("received").orderId, timestamp)
     }
 
     // calculate the delivery warnings
@@ -68,30 +67,21 @@ object StreamingJob {
     val deliveryPatternStream = CEP.pattern(input.keyBy("orderId"), deliveryPattern)
 
     val deliveryResult: DataStream[Either[DeliveryWarning, DeliverySuccess]] = deliveryPatternStream.select{
-      pattern =>
+      fullPattern =>
         DeliverySuccess(
-          pattern("shipped").orderId,
-          pattern("delivered").timestamp,
-          pattern("delivered").timestamp - pattern("shipped").timestamp
+          fullPattern("shipped").orderId,
+          fullPattern("delivered").timestamp,
+          fullPattern("delivered").timestamp - fullPattern("shipped").timestamp
         )
     } {
-      (pattern, timestamp) => DeliveryWarning(pattern("shipped").orderId, timestamp)
+      (partialPattern, timestamp) => DeliveryWarning(partialPattern("shipped").orderId, timestamp)
     }
 
-    val processingWarnings = processingResult.flatMapWith {
-      case Left(warning) => Seq(warning)
-      case _ => Seq()
-    }
+    val processingWarnings = processingResult.flatMap (_.left.toOption)
 
-    val processingSuccesses = processingResult.flatMapWith {
-      case Right(success) => Seq(success)
-      case _ => Seq()
-    }
+    val processingSuccesses = processingResult.flatMap (_.right.toOption)
 
-    val deliveryWarnings = deliveryResult.flatMapWith {
-      case Left(warning) => Seq(warning)
-      case _ => Seq()
-    }
+    val deliveryWarnings = deliveryResult.flatMap (_.left.toOption)
 
     val processingWarningTable = processingWarnings.toTable(tableEnv)
     val deliveryWarningTable = deliveryWarnings.toTable(tableEnv)
