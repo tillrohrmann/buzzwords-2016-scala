@@ -49,14 +49,14 @@ object StreamingJob {
 
     val processingPatternStream = CEP.pattern(input.keyBy("orderId"), processingPattern)
 
-    val processingResult: DataStream[Either[ProcessingWarning, ProcessingSuccess]] = processingPatternStream.select{
+    val processingResult: DataStream[Either[ProcessingWarning, ProcessingSuccess]] = processingPatternStream.select {
+      (partialPattern, timestamp) => ProcessingWarning(partialPattern("received").orderId, timestamp)
+    } {
       fullPattern =>
         ProcessingSuccess(
           fullPattern("received").orderId,
           fullPattern("shipped").timestamp,
           fullPattern("shipped").timestamp - fullPattern("received").timestamp)
-    } {
-      (partialPattern, timestamp) => ProcessingWarning(partialPattern("received").orderId, timestamp)
     }
 
     // calculate the delivery warnings
@@ -66,15 +66,15 @@ object StreamingJob {
 
     val deliveryPatternStream = CEP.pattern(input.keyBy("orderId"), deliveryPattern)
 
-    val deliveryResult: DataStream[Either[DeliveryWarning, DeliverySuccess]] = deliveryPatternStream.select{
+    val deliveryResult: DataStream[Either[DeliveryWarning, DeliverySuccess]] = deliveryPatternStream.select {
+      (partialPattern, timestamp) => DeliveryWarning(partialPattern("shipped").orderId, timestamp)
+    } {
       fullPattern =>
         DeliverySuccess(
           fullPattern("shipped").orderId,
           fullPattern("delivered").timestamp,
           fullPattern("delivered").timestamp - fullPattern("shipped").timestamp
         )
-    } {
-      (partialPattern, timestamp) => DeliveryWarning(partialPattern("shipped").orderId, timestamp)
     }
 
     val processingWarnings = processingResult.flatMap (_.left.toOption)
